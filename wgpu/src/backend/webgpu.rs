@@ -3740,16 +3740,25 @@ impl dispatch::SurfaceInterface for WebSurface {
         crate::SurfaceStatus,
         dispatch::DispatchSurfaceOutputDetail,
     ) {
-        let surface_texture = self.context.get_current_texture().unwrap();
-
-        let web_surface_texture = WebTexture {
-            inner: surface_texture,
-            ident: crate::cmp::Identifier::create(),
+        // A DOM exception (e.g. an invalidated canvas configuration) is a
+        // recoverable surface failure, not a Rust/WASM panic.
+        let (texture, status) = match self.context.get_current_texture() {
+            Ok(inner) => (
+                Some(
+                    WebTexture {
+                        inner,
+                        ident: crate::cmp::Identifier::create(),
+                    }
+                    .into(),
+                ),
+                crate::SurfaceStatus::Good,
+            ),
+            Err(_) => (None, crate::SurfaceStatus::Lost),
         };
 
         (
-            Some(web_surface_texture.into()),
-            crate::SurfaceStatus::Good,
+            texture,
+            status,
             WebSurfaceOutputDetail {
                 ident: crate::cmp::Identifier::create(),
             }
