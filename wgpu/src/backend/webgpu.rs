@@ -2370,6 +2370,10 @@ impl dispatch::DeviceInterface for WebDevice {
             );
         });
         let _ = self.inner.lost().then(&closure);
+        // The promise owns the JS function until it runs. Dropping the Rust
+        // Closure here invalidates that function before device.destroy resolves it.
+        // FnOnce releases its captures after invocation; JS GC owns the wrapper.
+        closure.forget();
     }
 
     fn on_uncaptured_error(&self, handler: Box<dyn crate::UncapturedErrorHandler>) {
