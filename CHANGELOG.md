@@ -42,6 +42,10 @@ Bottom level categories:
 
 ## Unreleased
 
+## Fork changes (based on v30.0.1)
+
+- Release WebGPU uncaptured-error callbacks when replaced, explicitly destroyed, or the last device clone is dropped. Device clones share callback ownership.
+
 ## v30.0.1 (2026-08-21)
 
 ### Bug Fixes

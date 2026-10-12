@@ -1043,6 +1043,10 @@ fn future_request_device(
 
             (
                 WebDevice {
+                    uncaptured_error_handler: Rc::new(WebUncapturedErrorHandler {
+                        device: device.clone(),
+                        closure: RefCell::new(None),
+                    }),
                     inner: device,
                     ident: crate::cmp::Identifier::create(),
                     error_scope_count: Rc::new(Cell::new(0)),
@@ -1272,6 +1276,28 @@ pub struct WebDevice {
     ident: crate::cmp::Identifier,
     /// Current number of error scopes that have been pushed on the device.
     error_scope_count: Rc<Cell<u32>>,
+    uncaptured_error_handler: Rc<WebUncapturedErrorHandler>,
+}
+
+#[derive(Debug)]
+struct WebUncapturedErrorHandler {
+    device: webgpu_sys::GpuDevice,
+    closure: RefCell<Option<Closure<dyn FnMut(webgpu_sys::GpuUncapturedErrorEvent)>>>,
+}
+
+impl WebUncapturedErrorHandler {
+    fn clear(&self) {
+        // Unregister before dropping the Rust closure retained by JavaScript.
+        self.device.set_onuncapturederror(None);
+        let previous = self.closure.borrow_mut().take();
+        drop(previous);
+    }
+}
+
+impl Drop for WebUncapturedErrorHandler {
+    fn drop(&mut self) {
+        self.clear();
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -2639,15 +2665,14 @@ impl dispatch::DeviceInterface for WebDevice {
     }
 
     fn on_uncaptured_error(&self, handler: Arc<dyn crate::UncapturedErrorHandler>) {
+        self.uncaptured_error_handler.clear();
         let f = Closure::wrap(Box::new(move |event: webgpu_sys::GpuUncapturedErrorEvent| {
             let error = crate::Error::from_js(event.error().value_of());
             handler(error);
         }) as Box<dyn FnMut(_)>);
         self.inner
             .set_onuncapturederror(Some(f.as_ref().unchecked_ref()));
-        // Release memory management of this closure from Rust to the JS GC.
-        // TODO: This will leak if weak references is not supported.
-        f.forget();
+        *self.uncaptured_error_handler.closure.borrow_mut() = Some(f);
     }
 
     fn push_error_scope(&self, filter: crate::ErrorFilter) -> u32 {
@@ -2709,6 +2734,7 @@ impl dispatch::DeviceInterface for WebDevice {
     }
 
     fn destroy(&self) {
+        self.uncaptured_error_handler.clear();
         self.inner.destroy();
     }
 }

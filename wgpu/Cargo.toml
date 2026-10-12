@@ -278,6 +278,9 @@ portable-atomic.workspace = true
 # Used in doc-tests
 bytemuck.workspace = true
 
+[target.'cfg(target_arch = "wasm32")'.dev-dependencies]
+wasm-bindgen-test = "=0.3.77"
+
 [build-dependencies]
 cfg_aliases.workspace = true
 
