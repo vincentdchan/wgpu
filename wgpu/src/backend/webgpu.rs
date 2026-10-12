@@ -917,6 +917,7 @@ fn future_request_device(
                 WebDevice {
                     inner: device,
                     ident: crate::cmp::Identifier::create(),
+                    uncaptured_error_handler: RefCell::new(None),
                 }
                 .into(),
                 WebQueue {
@@ -1139,6 +1140,9 @@ pub struct WebDevice {
     pub(crate) inner: webgpu_sys::GpuDevice,
     /// Unique identifier for this Device.
     ident: crate::cmp::Identifier,
+    /// Own the handler so replacement and device teardown release its captures.
+    uncaptured_error_handler:
+        RefCell<Option<Closure<dyn FnMut(webgpu_sys::GpuUncapturedErrorEvent)>>>,
 }
 
 #[derive(Debug)]
@@ -2377,14 +2381,14 @@ impl dispatch::DeviceInterface for WebDevice {
     }
 
     fn on_uncaptured_error(&self, handler: Box<dyn crate::UncapturedErrorHandler>) {
+        self.clear_uncaptured_error_handler();
         let f = Closure::wrap(Box::new(move |event: webgpu_sys::GpuUncapturedErrorEvent| {
             let error = crate::Error::from_js(event.error().value_of());
             handler(error);
         }) as Box<dyn FnMut(_)>);
         self.inner
             .set_onuncapturederror(Some(f.as_ref().unchecked_ref()));
-        // TODO: This will leak the memory associated with the error handler by default.
-        f.forget();
+        *self.uncaptured_error_handler.borrow_mut() = Some(f);
     }
 
     fn push_error_scope(&self, filter: crate::ErrorFilter) {
@@ -2425,12 +2429,22 @@ impl dispatch::DeviceInterface for WebDevice {
     }
 
     fn destroy(&self) {
+        self.clear_uncaptured_error_handler();
         self.inner.destroy();
+    }
+}
+impl WebDevice {
+    fn clear_uncaptured_error_handler(&self) {
+        // Unregister before dropping Closure: JS must never retain an invalid
+        // Rust callback, including when a replacement handler is installed.
+        self.inner.set_onuncapturederror(None);
+        let previous = self.uncaptured_error_handler.borrow_mut().take();
+        drop(previous);
     }
 }
 impl Drop for WebDevice {
     fn drop(&mut self) {
-        // no-op
+        self.clear_uncaptured_error_handler();
     }
 }
 
